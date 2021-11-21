@@ -6,10 +6,19 @@ const request = require('request');
 //const routes = require( "./routes" );
 
 // Game items to remember
-var tanks = [];
-var shots = [];
-var buzzSawTarget = -1;
+var tanks = new Map();
+var shots = new Map();
 var DEBUG = 0;
+
+// helper
+/**
+ * converts a Map object to a string for sending through an io socket.
+ * @param {Map} map the original map object.
+ * @returns the serialized string form of the map.
+ */
+const serialize = (map) => {
+  return JSON.stringify(Array.from(map.entries()))
+}
 
 // Set up the server
 // process.env.PORT is related to deploying on AWS
@@ -55,25 +64,24 @@ var io = require('socket.io')(server);
 io.sockets.on('connection',
   // We are given a websocket object in our function
   function (socket) {
-  
+ 
     // Always print this
     console.log("New Tank: " + socket.id);
 
     // Initial Add of New Client
     socket.on('ClientNewJoin',
       function(data) {
-        // Data comes in as whatever was sent, including objects
+        // data is a string that is the unique id of the new client socket
         console.log('New Client Join: ' + data);
       
-        // sending to individual socketid (private message)
-        io.to(socket.id).emit('ServerReadyAddNew', tanks);
+        // sending all the tanks to the new joiner
+        io.to(socket.id).emit('ServerReadyAddNew', serialize(tanks));
 
         // Send to all clients but sender socket
         //socket.broadcast.emit('NewTank', data);
         
         // This is a way to send to everyone including sender
         // io.sockets.emit('message', "this goes to everyone");
-
       }
     );
     
@@ -81,47 +89,30 @@ io.sockets.on('connection',
     socket.on('ClientNewTank',
       function(data) {
 
-        // Data comes in as whatever was sent, including objects
+        // data is json with tank information in it
         console.log('New Tank: ' + JSON.stringify(data));
 
-        // Add new tank to array
-        // First check if this tank is already in our list
-        var tankFound = false;
-        if(tanks !== undefined) {
-          for(var i=0; i < tanks.length; i++) {
-            if(tanks[i].tankid == data.tankid) {
-                    tankFound = true;
-                }
+        // Add new tank to Map
+        // what we do add is actually a json with the new tank info
+        if(!tanks.has(data.tankid))
+          tanks.set(data.tankid, 
+            { 
+              on: true, // connection status of the client
+              x: Number(data.x), y: Number(data.y), 
+              heading: Number(data.heading), tankColor: data.tankColor, 
+              tankid: data.tankid, playername: data.playername
             }
-        }
+          );
 
-        let newTank = { x: Number(data.x), y: Number(data.y), 
-          heading: Number(data.heading), tankColor: data.tankColor, 
-          tankid: data.tankid, playername: data.playername };
-
-        // Add this tank to the end of the array if not in array
-        if(!tankFound)
-          tanks.push(newTank);
-
-          if(DEBUG && DEBUG==1)
-            console.log(tanks);
+        if(DEBUG && DEBUG==1)
+          console.log(tanks);
 
         // Send the tank update after giving a quick delay for initialization
         const timeoutObj = setTimeout(() => {
-          // Send to all clients but sender socket
-//          socket.broadcast.emit('ServerNewTankAdd', tanks);
-          io.sockets.emit('ServerNewTankAdd', tanks);
+          io.sockets.emit('ServerNewTankAdd', serialize(tanks));
         }, 1500);
-
-
-        // If the buzzsaw target is not designated, set its target
-        if(buzzSawTarget < 0 && tanks.length > 0) {
-          this.buzzSawTarget = Math.floor(Math.random() * Math.floor(tanks.length));
-          io.sockets.emit('ServerBuzzSawNewChaser', tanks[this.buzzSawTarget].tankid);
-        }
       }
     );
-
 
     // Connected client moving Tank
     socket.on('ClientMoveTank',
@@ -132,180 +123,110 @@ io.sockets.on('connection',
           console.log('Move Tank: ' + JSON.stringify(data));
 
         // Change the local tank table
-        if(tanks !== undefined) {
-            for(var i=0; i < tanks.length; i++) {
-                if(tanks[i].tankid == data.tankid) {
-                  tanks[i].x = Number(data.x);
-                  tanks[i].y = Number(data.y);
-                  tanks[i].heading = data.heading;
-                }
-            }
+        if (tanks.has(data.tankid)){
+          tanks.get(tankid).x = Number(data.x);
+          tanks.get(tankid).y = Number(data.y);
+          tanks.get(tankid).heading = data.heading;
         }
 
-        
-        // Send the change out
-//        io.sockets.emit('ServerMoveTank', data);
-        // Send to all clients but sender socket
+        // Send the move out to all clients but sender socket
         socket.broadcast.emit('ServerMoveTank', data);
+      }
+    );
 
-      });
-
+    // disconnection event from a tank object
     socket.on('disconnect', function() {
       console.log("Client has disconnected: " + socket.id);
 
       if(DEBUG && DEBUG==1)
         console.log(tanks);
 
-        // Remove this tank
-        for (var i = tanks.length - 1; i >= 0; i--) {
-            if(tanks[i].tankid == socket.id) {
-                tanks.splice(i, 1);
-            }
-        }
-
-        // Tell everyone else its gone too
-        io.sockets.emit('ServerTankRemove', socket.id);
-
+      // instead we AFK the user
+      tanks.get(socket.id).on = false;
+      // Tell everyone else its gone too
+      io.sockets.emit('ServerTankRemove', socket.id);
     });
 
     // New Shot Object
     socket.on('ClientNewShot',
       function(data) {
-
-        // Data comes in as whatever was sent, including objects
+        // data is a JSON containing the info of a shot
         if(DEBUG && DEBUG==1)
           console.log('New Shot: ' + JSON.stringify(data));
 
         // Add this shot to the end of the array
-        shots.push(data);
+        shots.set(data.shotid, data)
 
         // Send the change out
         io.sockets.emit('ServerNewShot', data);
-
-      });
-
+      }
+    );
 
     // Connected client moving Shots
     socket.on('ClientMoveShot',
       function(data) {
-
-        // Data comes in as whatever was sent, including objects
+        // data contains the id of the shot and its current positions
         if(DEBUG && DEBUG==1)
           console.log('Move Shot: ' + JSON.stringify(data));
-
+        
         // Find the correct shot and save the index
-        var i = 0;
-        for(; i < shots.length; i++) {
-          if(shots[i].shotid == data.shotid) {
-            shots[i].x = Number(data.x);
-            shots[i].y = Number(data.y);
-            break;
-          }
+        if(shots.has(data.shotid)) {
+            shots.get(data.shotid).x = Number(data.x);
+            shots.get(data.shotid).y = Number(data.y);
+        }else{ // Just make sure it found one
+          return;
         }
-        // Just make sure it found one
-        if(shots[i]==undefined) return;
-
-        // Send the change out
-//        io.sockets.emit('ServerMoveShot', data);
 
         // Look for hits with all tanks
-        for (var t = tanks.length - 1; t >= 0; t--) {
+        let shot = shots.get(data.shotid);
+        tanks.forEach((id, tank, map) => {
           // As long as it's not the tank that fired the shot
-          if(shots[i].tankid == tanks[t].tankid)
+          if(shot.tankid == tank.tankid)
+            continue;
+          else if (tank.destroyed) // no need to search destroyed tanks
             continue;
           else {
-
-            var dist = Math.sqrt( Math.pow((shots[i].x-tanks[t].x), 2) + Math.pow((shots[i].y-tanks[t].y), 2) );
-
-//            var dist = dist(shots[i].x, shots[i].y, tanks[t].x, tanks[t].y);
-
-//            console.log('Dist: ' + dist);
-
-//            if(DEBUG && DEBUG==1)
-//              console.log('Dist.: ' + dist);
-
+            var dist = Math.sqrt(Math.pow((shot.x-tank.x), 2) + Math.pow((shot.y-tank.y), 2) );
             if(dist < 20.0) {
               if(DEBUG && DEBUG==1) {
                 console.log('HIT ------------------------');
-                console.log('shotid: ' + shots[i].shotid);
-                console.log('Shot-tankid: ' + shots[i].tankid);
-                console.log('ShotX: ' + shots[i].x);
-                console.log('ShotY: ' + shots[i].y);
-                console.log('Tank-tankid: ' + tanks[t].tankid);
-                console.log('TankX: ' + tanks[t].x);
-                console.log('TankY: ' + tanks[t].y);
+                console.log('shotid: ' + shot.shotid);
+                console.log('Shot-tankid: ' + shot.tankid);
+                console.log('ShotX: ' + shot.x);
+                console.log('ShotY: ' + shot.y);
+                console.log('Tank-tankid: ' + tank.tankid);
+                console.log('TankX: ' + tank.x);
+                console.log('TankY: ' + tank.y);
               }
               // It was a hit, remove the tank and shot
               // and tell everyone else its gone too
-              io.sockets.emit('ServerTankRemove', tanks[t].tankid);
-              tanks.splice(t,1);
-              shots.splice(i, 1);
+              io.sockets.emit('ServerTankRemove', tank.tankid);
+              tanks.get(tank.tankid).destroyed = true; // mark as hit
+              shots.delete(shot.shotid); // delete bullet
               // just return for now to keep from unknown errors
               return;
             }
           }
-        }
-
-      });
-
-    // Connected client moving Shots
-    socket.on('ClientRemoveShot',
-      function(data) {
-
-        // Data comes in as whatever was sent, including objects
-        if(DEBUG && DEBUG==1)
-          console.log('Remove Shot: ' + JSON.stringify(data));
-
-        // Get the shot to remove
-        const shotid = data.shotid;
-        for (var s = shots.length - 1; s >= 0; s--) {
-          if(shots[s].shotid = shotid) {
-            shots.splice(s, 1);
-            break;
-          }
-        }
-      });
+        });
+      }
+    );
 
     // Connected client moving Shots
     socket.on('ClientResetAll',
       function(data) {
-
-        // Data comes in as whatever was sent, including objects
+        // no data sent over
         console.log('Reset Server ');
-
         // Remove all the tanks
-        for (var t = tanks.length - 1; t >= 0; t--) {
-              // Remove the tank
-              // and tell everyone else its gone too
-              io.sockets.emit('ServerTankRemove', tanks[t].tankid);
- //             tanks.splice(t,1);
-        }
-
-        shots = [];
-        tanks = [];
+        tanks.forEach((id, tank, map) => {
+          // Tell everyone else this tank is gone
+          io.sockets.emit('ServerTankRemove', tank.tankid);
+        });
+        // reset variables
+        shots = new Map();
+        tanks = new Map();
 
         // Finally, reset the clients
         io.sockets.emit('ServerResetAll', data);
-
-
-      });
-    
-      /************  Buzz Saw  ***************/
-          // Connected client moving Shots
-    socket.on('ClientBuzzSawHit',
-    function() {
-
-      // Chase a different candidate for it to follow
-      if(tanks.length > 0) {
-        this.buzzSawTarget = Math.floor(Math.random() * Math.floor(tanks.length));
-        io.sockets.emit('ServerBuzzSawNewChaser', tanks[this.buzzSawTarget].tankid);
       }
-    });
-
-    socket.on('ClientBuzzSawMove',
-    function(data) {
-        // Transmit the new coordinates right out to the other clients
-        // only send to the other clients (not the original sender)
-        socket.broadcast.emit('ServerBuzzSawMove', data);
-    });
-  });
+    );
+});
