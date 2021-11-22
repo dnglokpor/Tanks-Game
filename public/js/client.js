@@ -148,11 +148,9 @@ function draw() {
 function keyPressed() {
   if(!mytankid)
     return;
-  
   // Can not be a destroyed tank!
   if (tanks.get(mytankid).destroyed)
     return;
-
   if (key == ' ') { // SPACE_KEY = Fire Shell
     const shotid = random(0, 50000);
     // record actual shot object
@@ -167,16 +165,19 @@ function keyPressed() {
     socket.emit('ClientNewShot', newShot);
     // Play a shot sound
     soundLib.playSound('tankfire');
-
-    return;
-  } else if (keyCode == RIGHT_ARROW) {  // Move Right
-    tanks.get(mytankid).setRotation(0.1);
-  } else if (keyCode == LEFT_ARROW) {   // Move Left
-    tanks.get(mytankid).setRotation(-0.1);
-  } else if (keyCode == UP_ARROW) {     // Move Forward
-    tanks.get(mytankid).moveForward(1.0);
-  } else if (keyCode == DOWN_ARROW) {   // Move Back
-    tanks.get(mytankid).moveForward(-1.0);
+  }
+  // movements
+  if (keyCode == RIGHT_ARROW) {  // Move Right
+    tanks.get(mytankid).setRotation(0.2);
+  }
+  if (keyCode == LEFT_ARROW) {   // Move Left
+    tanks.get(mytankid).setRotation(-0.2);
+  }
+  if (keyCode == UP_ARROW) {     // Move Forward
+    tanks.get(mytankid).moveForward(2.0);
+  }
+  if (keyCode == DOWN_ARROW) {   // Move Back
+    tanks.get(mytankid).moveForward(-2.0);
   }
 }
 
