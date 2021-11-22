@@ -8,7 +8,7 @@ const request = require('request');
 // Game items to remember
 var tanks = new Map();
 var shots = new Map();
-var DEBUG = 0;
+var DEBUG = 1;
 
 // helper
 /**
@@ -123,13 +123,14 @@ io.sockets.on('connection',
           console.log('Move Tank: ' + JSON.stringify(data));
 
         // Change the local tank table
-        if (tanks.has(data.tankid)){
+        let tankid = data.tankid
+        if (tanks.has(tankid)){
           tanks.get(tankid).x = Number(data.x);
           tanks.get(tankid).y = Number(data.y);
           tanks.get(tankid).heading = data.heading;
         }
 
-        // Send the move out to all clients but sender socket
+        // Send the move out to all clients but sender s  ocket
         socket.broadcast.emit('ServerMoveTank', data);
       }
     );
@@ -144,7 +145,7 @@ io.sockets.on('connection',
       // instead we AFK the user
       tanks.get(socket.id).on = false;
       // Tell everyone else its gone too
-      io.sockets.emit('ServerTankRemove', socket.id);
+      io.sockets.emit('ServerTankDisconnect', socket.id);
     });
 
     // New Shot Object
@@ -179,13 +180,10 @@ io.sockets.on('connection',
 
         // Look for hits with all tanks
         let shot = shots.get(data.shotid);
-        tanks.forEach((id, tank, map) => {
+        tanks.forEach((tank) => {
           // As long as it's not the tank that fired the shot
-          if(shot.tankid == tank.tankid)
-            continue;
-          else if (tank.destroyed) // no need to search destroyed tanks
-            continue;
-          else {
+          // no need to search destroyed tanks either
+          if(!(shot.tankid == tank.tankid || tank.destroyed)){
             var dist = Math.sqrt(Math.pow((shot.x-tank.x), 2) + Math.pow((shot.y-tank.y), 2) );
             if(dist < 20.0) {
               if(DEBUG && DEBUG==1) {
@@ -217,7 +215,7 @@ io.sockets.on('connection',
         // no data sent over
         console.log('Reset Server ');
         // Remove all the tanks
-        tanks.forEach((id, tank, map) => {
+        tanks.forEach((tank) => {
           // Tell everyone else this tank is gone
           io.sockets.emit('ServerTankRemove', tank.tankid);
         });

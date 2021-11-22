@@ -1,11 +1,9 @@
 var win;
 //var tank; // Just this instance of the tank
-let tanks = []; // All tanks in the game 
-let shots = []; // All shots in the game
-var socketID;
-var mytankid;
-var myTankIndex = -1;
-var buzz = undefined;
+let tanks = new Map(); // All tanks in the game 
+let shots = new Map(); // All shots in the game
+var socketID = undefined;
+var mytankid = undefined;
 
 var socket;
 var oldTankx, oldTanky, oldTankHeading;
@@ -16,6 +14,16 @@ var loopCount = 0.0;  // Keep a running counter to handle animations
 
 // Sounds activated
 const soundLib = new sounds();
+
+// helper
+/**
+ * parses the passed JSON string into a Map object.
+ * @param {string} serializedMap 
+ * @returns a Map object with all the properties of the JSON object.
+ */
+const parseMap = (serializedMap) => {
+  return new Map(JSON.parse(serializedMap));
+}
 
 // Initial Setup
 function setup() {
@@ -52,291 +60,264 @@ function setup() {
   const server = window.location.hostname + ":" + location.port;
   socket = io.connect(server, {transports: ['polling']});
 
-  // All the socket method handlers
+  // All the socket listener method
   socket.on('ServerReadyAddNew', ServerReadyAddNew);
   socket.on('ServerNewTankAdd', ServerNewTankAdd);
   socket.on('ServerTankRemove', ServerTankRemove);
+  socket.on('ServerTankDisconnect', ServerTankDisconnect);
   socket.on('ServerMoveTank', ServerMoveTank);
   socket.on('ServerResetAll', ServerResetAll);
-  socket.on('ServerMoveShot', ServerMoveShot);
+  socket.on('ServerMoveShot', ServerMoveShot);;;
   socket.on('ServerNewShot', ServerNewShot);
-  socket.on('ServerBuzzSawNewChaser', ServerBuzzSawNewChaser);
-  socket.on('ServerBuzzSawMove', ServerBuzzSawMove);
 
   // Join (or start) a new game
   socket.on('connect', function(data) {
     socketID = socket.io.engine.id;
     socket.emit('ClientNewJoin', socketID);
   });
-
-  // Create a new Buzz
-//  buzz = new Buzzsaw(win.width/2, win.height/2, color('#ffdc49'));
 }
   
 // Draw the screen and process the position updates
 function draw() {
-    background(0);
+  background(0);
 
-    // Loop counter
-    if(loopCount > 359*10000)
-      loopCount = 0;
-    else
-      loopCount++;
+  // Loop counter
+  if(loopCount > 359*10000)
+    loopCount = 0;
+  else
+    loopCount++;
 
-    // Process shots
-    for (var i = shots.length - 1; i >= 0; i--) {
-      shots[i].render();
-      shots[i].update();
-      if (shots[i].offscreen()) {
-        shots.splice(i, 1);
-      }
-      else {
-        let shotData = { x: shots[i].pos.x, y: shots[i].pos.y, 
-          shotid: shots[i].shotid };
-        socket.emit('ClientMoveShot', shotData);
-      }
+  // Process shots
+  let expired = [];
+  shots.forEach((shot, id) => {
+    shot.render();
+    shot.update();
+    if (shot.offscreen()) {
+      expired.push(id);
     }
-    // Process all the tanks by iterating through the tanks array
-    if(tanks && tanks.length > 0) {
-      for (var t = 0; t < tanks.length; t++) {
-        if(tanks[t].tankid==mytankid) {
-          tanks[t].render();
-          tanks[t].turn();
-          tanks[t].update();
-
-          // Check for off screen and don't let it go any further
-          if(tanks[t].pos.x < 0)
-            tanks[t].pos.x = 0;
-          if(tanks[t].pos.x > win.width)
-            tanks[t].pos.x = win.width;
-          if(tanks[t].pos.y < 0)
-            tanks[t].pos.y = 0;
-          if(tanks[t].pos.y > win.height)
-            tanks[t].pos.y = win.height;
-            
+    else {
+      let shotData = { x: shot.pos.x, y: shot.pos.y, 
+        shotid: shot.shotid };
+      socket.emit('ClientMoveShot', shotData);
+    }
+  });
+  // delete expired shots
+  expired.forEach(e => {
+    if(shots.has(e)){
+      shots.delete(e);
+    }
+  });
+  // Process all the tanks by iterating through the tanks array
+  if(tanks && tanks.size > 0) {
+    tanks.forEach((tank, id) => {
+      if(id == mytankid) {
+        if (!tank.destroyed){
+          tank.turn();
+          tank.update();
         }
-        else {  // Only render if within 150 pixels
-//          var dist = Math.sqrt( Math.pow((tanks[myTankIndex].pos.x-tanks[t].pos.x), 2) + Math.pow((tanks[myTankIndex].pos.y-tanks[t].pos.y), 2) );
-//          if(dist < 151)
-            tanks[t].render();
-        }
+
+        // Check for off screen and don't let it go any further
+        if(tank.pos.x < 0)
+          tank.pos.x = 0;
+        if(tank.pos.x > win.width)
+          tank.pos.x = win.width;
+        if(tank.pos.y < 0)
+          tank.pos.y = 0;
+        if(tank.pos.y > win.height)
+          tank.pos.y = win.height;
       }
-      
-      // Temporary Buzzsaw
-      if(buzz) {
-        buzz.render(this.loopCount);
-        buzz.update(tanks[myTankIndex]);
-        buzz.checkBuzzShot();
-      }
-    }
-
-      // To keep this program from being too chatty => Only send server info if something has changed
-      if(tanks && tanks.length > 0 && myTankIndex > -1
-        && (oldTankx!=tanks[myTankIndex].pos.x || oldTanky!=tanks[myTankIndex].pos.y || oldTankHeading!=tanks[myTankIndex].heading)) {
-        let newTank = { x: tanks[myTankIndex].pos.x, y: tanks[myTankIndex].pos.y, 
-          heading: tanks[myTankIndex].heading, tankColor: tanks[myTankIndex].tankColor, 
-          tankid: tanks[myTankIndex].tankid };
-        socket.emit('ClientMoveTank', newTank);
-        oldTankx = tanks[myTankIndex].pos.x;
-        oldTanky = tanks[myTankIndex].pos.y;
-        oldTankHeading = tanks[myTankIndex].heading;
-      }
-    }
-    
-
-  // Handling pressing a Keys
-  function keyPressed() {
-
-    if(!tanks || myTankIndex < 0)
-      return;
-
-    // Can not be a destroyed tank!
-    if (tanks[myTankIndex].destroyed)
-      return;
-
-    if (key == ' ') {                       // Fire Shell
-      const shotid = random(0, 50000);
-      shots.push(new Shot(shotid, tanks[myTankIndex].tankid, tanks[myTankIndex].pos, 
-        tanks[myTankIndex].heading, tanks[myTankIndex].tankColor));
-      let newShot = { x: tanks[myTankIndex].pos.x, y: tanks[myTankIndex].pos.y, heading: tanks[myTankIndex].heading, 
-        tankColor: tanks[myTankIndex].tankColor, shotid: shotid, tankid: tanks[myTankIndex].tankid };
-      socket.emit('ClientNewShot', newShot);
-      // Play a shot sound
-      soundLib.playSound('tankfire');
-
-      return;
-    } else if (keyCode == RIGHT_ARROW) {  // Move Right
-      tanks[myTankIndex].setRotation(0.1);
-    } else if (keyCode == LEFT_ARROW) {   // Move Left
-      tanks[myTankIndex].setRotation(-0.1);
-    } else if (keyCode == UP_ARROW) {     // Move Forward
-      tanks[myTankIndex].moveForward(1.0);
-    } else if (keyCode == DOWN_ARROW) {   // Move Back
-      tanks[myTankIndex].moveForward(-1.0);
-    }
-
-
+      if (!tank.destroyed) // render any tanks unless destroyed
+        tank.render();
+    });
   }
 
-  // Release Key
-  function keyReleased() {
-    if(!tanks || myTankIndex < 0)
-      return;
-
-    //    if(keyCode == RIGHT_ARROW || keyCode == LEFT_ARROW)
-    tanks[myTankIndex].setRotation(0.0);
-//    if(keyCode == UP_ARROW || keyCode == DOWN_ARROW)
-    tanks[myTankIndex].stopMotion();
-  }
-
-  
-  //  ***** Socket communication handlers ******
-
-  function ServerReadyAddNew(data) {
-    console.log('Server Ready');
-
-    // Reset the tanks
-    tanks = [];
-    mytankid = undefined;
-    myTankIndex = -1;
-
-    // Create the new tank
-    // Make sure it's starting position is at least 20 pixels from the border of all walls
-    let startPos = createVector(Math.floor(Math.random()*(win.width-40)+20), Math.floor(Math.random()*(win.height-40)+20));
-    let startColor = color(Math.floor(Math.random()*255), Math.floor(Math.random()*255), Math.floor(Math.random()*255));
-    let newTank = { x: startPos.x, y: startPos.y, heading: 0, tankColor: startColor, tankid: socketID, playername: PlayerName };
-
-
-    // Create the new tank and add it to the array
-    mytankid = socketID;
-    myTankIndex = tanks.length;
-    var newTankObj = new Tank(startPos, startColor, mytankid, PlayerName)
-    tanks.push(newTankObj);
-
-    // Send this new tank to the server to add to the list
-    socket.emit('ClientNewTank', newTank);
-  }
-
-    // Server got new tank -- add it to the list
-    function ServerNewTankAdd(data) {
-      if(DEBUG && DEBUG==1)
-        console.log('New Tank: ' + data);
-      
-      // Add any tanks not yet in our tank array
-      var tankFound = false;
-      if(tanks !== undefined) {
-        for(var d=0; d < data.length; d++) {
-          var foundIndex = -1;
-          for(var t=0; t < tanks.length; t++) {
-            // If found a match, then stop looking
-            if(tanks[t].tankid == data[d].tankid) {
-              tankFound = true;
-              foundIndex = t;
-              break;
-            }
-          }
-          if(!tankFound && foundIndex < 0)
-          {
-            // Add this tank to the end of the array
-            let startPos = createVector(Number(data[d].x), Number(data[d].y));
-            let c = color(data[d].tankColor.levels[0], data[d].tankColor.levels[1], data[d].tankColor.levels[2]);
-            let newTankObj = new Tank(startPos, c, data[d].tankid, data[d].playername);
-            tanks.push(newTankObj);
-          }
-          tankFound = false;
-        }
-      }
-  
-    }
-
-    function ServerTankRemove(socketid) {
-//      console.log('Remove Tank: ' + socketid);
-
-      if(!tanks || myTankIndex < 0)
-      return;
-
-      for (var i = tanks.length - 1; i >= 0; i--) {
-        if(tanks[i].tankid == socketid) {
-          tanks[i].destroyed = true;
-          return;
-        }
-      }
-    }
-
-    function ServerMoveTank(data) {
-
-      if(DEBUG && DEBUG==1)
-        console.log('Move Tank: ' + JSON.stringify(data));
-
-      if(!tanks || !tanks[myTankIndex] || !data || !data.tankid || tanks[myTankIndex].tankid == data.tankid)
-        return;
-
-      for (var i = tanks.length - 1; i >= 0; i--) {
-        if(tanks[i].tankid == data.tankid) {
-            tanks[i].pos.x = Number(data.x);
-            tanks[i].pos.y = Number(data.y);
-            tanks[i].heading = Number(data.heading);
-            break;
-          }
-      }
-    }
-
-    function ServerNewShot(data) {
-      // First check if this shot is already in our list
-      if(shots !== undefined) {
-        for(var i=0; i < shots.length; i++) {
-          if(shots[i].shotid == data.shotid) {
-            return; // dont add it
-          }
-        }
-      }
-  
-      // Add this shot to the end of the array
-      let c = color(data.tankColor.levels[0], data.tankColor.levels[1], data.tankColor.levels[2]);
-      shots.push(new Shot(data.shotid, data.tankid, createVector(data.x, data.y), data.heading, c));
-    }
-
-    function ServerMoveShot(data) {
-
-      if(DEBUG && DEBUG==1)
-        console.log('Move Shot: ' + data);
-
-      for (var i = shots.length - 1; i >= 0; i--) {
-        if(shots[i].shotid == data.shotid) {
-          shots[i].pos.x = Number(data.x);
-          shots[i].pos.y = Number(data.y);
-          break;
-        }
-      }
-    }
-
-    // Handle a restart command
-    function Restart() {
-      socket.emit('ClientResetAll');
-    }
-
-    // The call to reload all pages
-    function ServerResetAll(data) {
-      console.log('Reset System');
-      document.forms[0].submit();
-//      location.reload();
-    }
-
-/************  Buzz Saw  ***************/
-
-  // Set the new target for Buzz
-  function ServerBuzzSawNewChaser(data) {
-  if(buzz) {
-      buzz.setTarget(data);
+  // To keep this program from being too chatty => Only send server info if something has changed
+  if(tanks && tanks.size > 0 && tanks.has(mytankid)
+    && (oldTankx!=tanks.get(mytankid).pos.x || oldTanky!=tanks.get(mytankid).pos.y || oldTankHeading!=tanks.get(mytankid).heading)) {
+    let newTank = { x: tanks.get(mytankid).pos.x, y: tanks.get(mytankid).pos.y, 
+      heading: tanks.get(mytankid).heading, tankColor: tanks.get(mytankid).tankColor, 
+      tankid: tanks.get(mytankid).tankid };
+    socket.emit('ClientMoveTank', newTank);
+    oldTankx = tanks.get(mytankid).pos.x;
+    oldTanky = tanks.get(mytankid).pos.y;
+    oldTankHeading = tanks.get(mytankid).heading;
   }
 }
 
-// Set the position of the Buzz saw
-function ServerBuzzSawMove(data) {
-  if(buzz) {
-    buzz.position.x = data.x;
-    buzz.position.y = data.y;
-    buzz.velocity.x = data.xvel;
-    buzz.velocity.y = data.yvel;
+// Handling pressing a Keys
+function keyPressed() {
+  if(!mytankid)
+    return;
+  
+  // Can not be a destroyed tank!
+  if (tanks.get(mytankid).destroyed)
+    return;
+
+  if (key == ' ') { // SPACE_KEY = Fire Shell
+    const shotid = random(0, 50000);
+    // record actual shot object
+    shots.set(shotid,
+      new Shot(shotid, tanks.get(mytankid).tankid, tanks.get(mytankid).pos, 
+        tanks.get(mytankid).heading, tanks.get(mytankid).tankColor
+      )
+    );
+    // send JSON version to server for broadcast
+    let newShot = { x: tanks.get(mytankid).pos.x, y: tanks.get(mytankid).pos.y, heading: tanks.get(mytankid).heading, 
+      tankColor: tanks.get(mytankid).tankColor, shotid: shotid, tankid: tanks.get(mytankid).tankid };
+    socket.emit('ClientNewShot', newShot);
+    // Play a shot sound
+    soundLib.playSound('tankfire');
+
+    return;
+  } else if (keyCode == RIGHT_ARROW) {  // Move Right
+    tanks.get(mytankid).setRotation(0.1);
+  } else if (keyCode == LEFT_ARROW) {   // Move Left
+    tanks.get(mytankid).setRotation(-0.1);
+  } else if (keyCode == UP_ARROW) {     // Move Forward
+    tanks.get(mytankid).moveForward(1.0);
+  } else if (keyCode == DOWN_ARROW) {   // Move Back
+    tanks.get(mytankid).moveForward(-1.0);
   }
+}
+
+// Release Key
+function keyReleased() {
+  if(!tanks.has(mytankid))
+    return;
+  // stop mouvement
+  tanks.get(mytankid).setRotation(0.0);
+  tanks.get(mytankid).stopMotion();
+}
+  
+//  ***** Socket communication handlers ******
+function ServerReadyAddNew(data) {
+  console.log('Server Ready');
+
+  // Reset the tanks
+  tanks = new Map();
+  mytankid = undefined;
+
+  // Create the new tank
+  // Make sure it's starting position is at least 20 pixels from the border of all walls
+  let startPos = createVector(Math.floor(Math.random()*(win.width-40)+20), Math.floor(Math.random()*(win.height-40)+20));
+  let startColor = color(Math.floor(Math.random()*255), Math.floor(Math.random()*255), Math.floor(Math.random()*255));
+  let newTank = { x: startPos.x, y: startPos.y, heading: 0, tankColor: startColor, tankid: socketID, playername: PlayerName };
+
+  // Create the new tank and add it to the array
+  mytankid = socketID;
+  var newTankObj = new Tank(startPos, startColor, mytankid, PlayerName)
+  tanks.set(mytankid, newTankObj);
+
+  // Send this new tank to the server to add to the list
+  socket.emit('ClientNewTank', newTank);
+}
+
+/**
+ * upon receiving the complete list of tanks of the server,
+ * check for new tanks and adds them to the local
+ * database of tanks.
+ * @param {string} data 
+ */
+function ServerNewTankAdd(data) {
+  // data is a serialized map of all tanks info so we convert it back to a map
+  data = parseMap(data);
+  if(DEBUG && DEBUG==1)
+    console.log('New Tank: ' + data);
+  // Add any tanks not yet in our tank array
+  data.forEach((tank, id) => {
+    if (!tanks.has(id))
+    {
+      // Add this tank to the end of the array
+      let startPos = createVector(Number(tank.x), Number(tank.y));
+      let c = color(tank.tankColor.levels[0], tank.tankColor.levels[1], tank.tankColor.levels[2]);
+      let newTankObj = new Tank(startPos, c, tank.tankid, tank.playername);
+      tanks.set(id, newTankObj);
+    }
+  });
+  return;
+}
+
+/**
+ * mark the tank at **socketid** as destroyed.
+ * @param {string} socketid the id of the tank that was destroyed
+ */
+function ServerTankRemove(socketid) {
+  // console.log('Remove Tank: ' + socketid);
+  if(tanks.has(socketid)){
+      tanks.get(socketid).destroyed = true;
+  }
+  return;
+}
+
+/**
+ * changes the **on** property of the tank of id **socketid** to 
+ * **false** meaning that the player has disconnected from server.
+ * @param {string} socketid the id of the client that is disconnected
+ */
+function ServerTankDisconnect(socketid) {
+  // console.log('Remove Tank: ' + socketid);
+  if(tanks.has(socketid)){
+      tanks.get(socketid).on = true;
+  }
+  return;
+}
+
+/**
+ * change the position of the specified tank.
+ * @param {JSON} data a json containing the id of the tank, its new position and heading.
+ */
+function ServerMoveTank(data) {
+  data = JSON.parse(data);
+  if(DEBUG && DEBUG==1)
+    console.log('Move Tank: ' + JSON.stringify(data));
+  
+  if(tanks.has(data.tankid)){
+      tanks.get(data.tankid).pos.x = Number(data.x);
+      tanks.get(data.tankid).pos.y = Number(data.y);
+      tanks.get(data.tankid).heading = Number(data.heading);
+  }
+}
+
+/**
+ * add a new Shot object to the list of shots.
+ * @param {JSON} data the basic info needed to build the Shot object
+ */
+function ServerNewShot(data) {
+  // First check if this shot is already in our list
+  if(!shots.has(data.shotid)) {
+    // Add this shot to the end of the array
+    let c = color(data.tankColor.levels[0], data.tankColor.levels[1], data.tankColor.levels[2]);
+    shots.set(data.shotid,
+      new Shot(data.shotid, data.tankid, createVector(data.x, data.y), data.heading, c)); 
+  }
+}
+
+/**
+ * change the position of the specified shot
+ * @param {*} data 
+ */
+function ServerMoveShot(data) {
+  if(DEBUG && DEBUG==1)
+    console.log('Move Shot: ' + data);
+  if(shots.has(shotid)) {
+      shots.get(shotid).pos.x = Number(data.x);
+      shots.get(shotid).pos.y = Number(data.y);
+  }
+}
+
+/**
+ * send a restart flag to the server.
+ */
+function Restart() {
+  socket.emit('ClientResetAll');
+}
+
+/**
+ * respond to a restart flag from server
+ * @param {*} data nothing really is sent at the moment.
+ */
+function ServerResetAll(data) {
+  console.log('Reset System');
+  document.forms[0].submit();
+  // location.reload();
 }

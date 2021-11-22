@@ -6,7 +6,7 @@ function Shot(shotid, tankid, spos, angle, color) {
     this.color = color;
     this.shotid = shotid;
     this.tankid = tankid;
-  
+    
     this.update = function() {
       this.pos.add(this.vel);
     }
