@@ -43,6 +43,7 @@ function setup() {
 
   // Set drawing parmameters
   rectMode(CENTER);
+  textSize(32);
   textAlign(CENTER, CENTER);
 
   // Set window size and push to the main screen
@@ -86,6 +87,8 @@ function draw() {
     loopCount = 0;
   else
     loopCount++;
+
+  // draw shells
 
   // Process shots
   let expired = [];

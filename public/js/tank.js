@@ -13,26 +13,18 @@ class Tank {
   */
   constructor(startPos, tankColor, newtankid, playerName) {
     this.on = true; // conection status
+    this.tankid = newtankid;
+    this.playerName = playerName;
     this.pos = startPos.copy();
     this.r = 20;
     this.heading = 0;
     this.rotation = 0;
     this.vel = createVector(0, 0);
-    this.isBoosting = false;
     this.destroyed = false;
     this.tankColor = tankColor;
-    this.tankid = newtankid;
-    this.playerName = playerName;
-
-    // For an optional boost feature
-    this.boosting = function (b) {
-      this.isBoosting = b;
-    };
-
-    this.boost = function () {
-      var force = p5.Vector.fromAngle(this.heading);
-      this.vel.add(force);
-    };
+    this.health = 10; // hp
+    this.ammo = undefined; // bullets
+    this.hasAmmo = false;
 
     // Render - to render the tank to the screen
     this.render = function () {
@@ -96,10 +88,29 @@ class Tank {
 
     // Update its forward and backward motion
     this.update = function () {
-      if (this.isBoosting) {
-        this.boost();
-      }
       this.pos.add(this.vel);
     };
+
+    /**
+     * set the picked up shells as the current shell to use.
+     * @param {*} shells a shot object
+     * @returns the old equipped shells if there was else just undefined.
+     */
+    this.pickup = function(shell) {
+      let old = this.ammo;
+      this.ammo = shell;
+      this.hasAmmo = this.ammo.rounds > 0; // there are rounds in the shell
+      return old; // drop the old
+    }
+
+    /**
+     * reduce the armor by an amount depending on collided shell.
+     * @param {*} shot the shell that collided with the tank.
+     */
+    this.takedamage = function(shot){
+      this.health -= shot.power;
+      this.health = this.health < 0 ? 0 : this.health;
+      this.destroyed = this.health == 0; // destroyed when no health left
+    }
   }
 }
