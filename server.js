@@ -10,6 +10,13 @@ var tanks = new Map();
 var shots = new Map();
 var DEBUG = 1;
 
+// stage ammunitions
+var resource = new Map();
+resource.set(1, {"type": "R", "coords": {"x": 200, "y": 200}});
+resource.set(2, {"type": "S", "coords": {"x": 200, "y": 400}});
+resource.set(3, {"type": "B", "coords": {"x": 400, "y": 200}});
+resource.set(4, {"type": "R", "coords": {"x": 400, "y": 400}});
+
 // helper
 /**
  * converts a Map object to a string for sending through an io socket.
@@ -74,8 +81,14 @@ io.sockets.on('connection',
         // data is a string that is the unique id of the new client socket
         console.log('New Client Join: ' + data);
       
-        // sending all the tanks to the new joiner
-        io.to(socket.id).emit('ServerReadyAddNew', serialize(tanks));
+        // sending all the tanks and ammo to the new joiner
+        io.to(socket.id).emit('ServerReadyAddNew',
+          {
+            "resource": serialize(resource),
+            "opponents": serialize(tanks),
+            "flying": serialize(shots)
+          }
+        );
 
         // Send to all clients but sender socket
         //socket.broadcast.emit('NewTank', data);

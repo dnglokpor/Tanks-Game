@@ -2,6 +2,8 @@ var win;
 //var tank; // Just this instance of the tank
 let tanks = new Map(); // All tanks in the game 
 let shots = new Map(); // All shots in the game
+let resource = new Map(); // All available resources
+let rc = {'r':255, 'g':50, 'b':111}; // color render
 var socketID = undefined;
 var mytankid = undefined;
 
@@ -25,7 +27,6 @@ const parseMap = (serializedMap) => {
   return new Map(JSON.parse(serializedMap));
 }
 
-// Initial Setup
 function setup() {
 
   // Start the audio context on a click/touch event
@@ -41,18 +42,18 @@ function setup() {
   PlayerName = document.getElementById('playerName').value;
   console.log('Player: ' + PlayerName);
 
-  // Set drawing parmameters
-  rectMode(CENTER);
-  textSize(32);
-  textAlign(CENTER, CENTER);
-
   // Set window size and push to the main screen
   // Good DEV size
-  win = { width: 600, height: 600 };
+  //win = { width: 600, height: 600 };
   // Good PROD size
-//  win = { width: 900, height: 700 };
+  win = { width: 900, height: 700 };
   var canvas = createCanvas(win.width, win.height);
   canvas.parent('sketch-holder');
+
+  // Set drawing parmameters
+  rectMode(CENTER);
+  textSize(win.width / 70);
+  textAlign(CENTER, CENTER);
 
   // Set the framerate so everyone is *hopefully* the same
   frameRate(fps); // As low as possible to not tax slow systems
@@ -80,7 +81,7 @@ function setup() {
   
 // Draw the screen and process the position updates
 function draw() {
-  background(0);
+  background(128);
 
   // Loop counter
   if(loopCount > 359*10000)
@@ -88,9 +89,19 @@ function draw() {
   else
     loopCount++;
 
+  
+  if (loopCount % 45 == 0){
+    rc.r = Math.floor(Math.random() * 127) + 128
+    rc.g = Math.floor(Math.random() * 127) + 128
+    rc.b = Math.floor(Math.random() * 127) + 128;
+  }
   // draw shells
+  resource.forEach((shell) => {
+    shell.render(color(rc.r, rc.g, rc.b));
+  });
 
   // Process shots
+  // TODO modify to turn into rounds
   let expired = [];
   shots.forEach((shot, id) => {
     shot.render();
@@ -155,6 +166,7 @@ function keyPressed() {
   if (tanks.get(mytankid).destroyed)
     return;
   if (key == ' ') { // SPACE_KEY = Fire Shell
+    // TODO integrate the cooldown, rounds type into this
     const shotid = random(0, 50000);
     // record actual shot object
     shots.set(shotid,
@@ -194,12 +206,44 @@ function keyReleased() {
 }
   
 //  ***** Socket communication handlers ******
+/**
+ * this is the initial data of the game environment
+ * as received by the client on connection.
+ * @param {JSON} data a JSON containing the resource, the opponents and the shots in play for the new client.
+ */
 function ServerReadyAddNew(data) {
   console.log('Server Ready');
 
-  // Reset the tanks
-  tanks = new Map();
-  mytankid = undefined;
+  // set the tanks
+  tanks = parseMap(data.opponents);
+  shots = parseMap(data.flying);
+  // resource
+  parseMap(data.resource).forEach((res, rid) => {
+    let ammo = undefined;
+    switch(res.type){
+      case 'S':
+        ammo = new Shell(
+          rid,
+          "Split Armor Wrecker", 10, res.coords.x, res.coords.y,
+          "Power: 5|Range: LOW|Cooldown: 3s"
+        );
+        break;
+      case 'B':
+        ammo = new Shell(
+          rid,
+          "Ballistic Armor Wrecker", 15, res.coords.x, res.coords.y,
+          "Power: 8|Range: HIGH|Cooldown: 5s"
+        );
+        break;
+      default:
+        ammo = new Shell(
+          rid,
+          "Rapid Armor Wrecker", 35, res.coords.x, res.coords.y,
+          "Power: 2|Range: MEDIUM|Cooldown: 1s"
+        );
+    }
+    resource.set(rid, ammo);
+  });
 
   // Create the new tank
   // Make sure it's starting position is at least 20 pixels from the border of all walls

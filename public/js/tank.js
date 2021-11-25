@@ -25,6 +25,8 @@ class Tank {
     this.health = 10; // hp
     this.ammo = undefined; // bullets
     this.hasAmmo = false;
+    this.lastShot = 0; // for cooldown purposes
+    this.canShoot = true; // for cooldown purposes
 
     // Render - to render the tank to the screen
     this.render = function () {
@@ -113,4 +115,6 @@ class Tank {
       this.destroyed = this.health == 0; // destroyed when no health left
     }
   }
+
+  // TODO implement a cooldown control
 }
