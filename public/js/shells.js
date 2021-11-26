@@ -37,26 +37,37 @@ class Shell {
         /**
          * builds and return the right kind of round based on what
          * shell is equipped.
-         * @returns a the object contructor for the round matching this shell.
+         * @param {string} tankid the id of the tank shooting.
+         * @param {Vector} spos the current coords of the tank shooting.
+         * @param {*} angle the direction vector of shot.
+         * @returns the rounds shot in a list.
          */
-        this.loadShell = function() {
-            shot = undefined;
+        this.fireShell = function(tankid, spos, angle) {
+            shot = []; // shots to spawn
             switch(this.name){
                 case "Split Armor Wrecker":
-                    shot = SplitAW;
+                    shot.push(new SplitAW(tankid, this.rounds, spos,
+                        angle - (Math.PI/15))
+                    );
+                    shot.push(new SplitAW(tankid, this.rounds, spos, angle));
+                    shot.push(new SplitAW(tankid, this.rounds, spos,
+                        angle + (Math.PI/15))
+                    );
+                    break;
                 case "Ballistic Armor Wrecker":
-                    shot = BallisticAW;
+                    shot.push(new BallisticAW(tankid, this.rounds, spos, angle));
                     break; 
                 default: // Raw Armor Wrecker
-                    shot = RapidAW;
+                    shot.push(new RapidAW(tankid, this.rounds, spos, angle));
             }
             this.unload(); // countdown
             return shot;
         };
+        
         /** 
          * draws this Shell object to the screen.
          * @param resColor a triplet indicating an RGB color.
-        */
+         */
         this.render = function(resColor){
             // push drawing context
             push();

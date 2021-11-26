@@ -142,6 +142,9 @@ io.sockets.on('connection',
           tanks.get(tankid).y = Number(data.y);
           tanks.get(tankid).heading = data.heading;
         }
+        // TODO add spatial hashing logic
+        
+        // TODO add pickup logic
 
         // Send the move out to all clients but sender s  ocket
         socket.broadcast.emit('ServerMoveTank', data);

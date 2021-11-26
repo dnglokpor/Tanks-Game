@@ -15,11 +15,10 @@ class BaseRound {
      * @param {*} color the color of this round.
     */
     constructor(tankid, idx, spos, angle, power, speed, range, cd, color) {
-        this.flying = true;
-        this.tankid = tankid;
-        this.shotid = this.tankid + '>' + idx.toString();
+        this.shotid = tankid + '>' + idx.toString();
         this.initPos = createVector(spos.x, spos.y);
         this.pos = createVector(spos.x, spos.y);
+        this.flying = true;
         this.heading = angle;
         this.vel = p5.Vector.fromAngle(angle);
         this.vel.mult(speed);
@@ -28,6 +27,37 @@ class BaseRound {
         this.cd = cd;
         this.color = color;
 
+        /**
+         * @returns the ID of the tank that shot this shell.
+         */
+        this.getTankID = function() {
+            return this.shotid.split('>')[0];
+        };
+        /**
+         * @returns the ID of the round from its shell.
+         */
+         this.getID = function() {
+            return this.shotid.split('>')[1];
+        };
+        /**
+         * @returns the cooldown time of the tank. cooldown is in seconds.
+         */
+         this.getCD = function() {
+            return this.cd;
+        };
+        /**
+         * @returns a json object allowing to clone this round.
+         */
+        this.jsonize = function(){
+            return {
+                "tankid": this.getTankID(),
+                "id": this.getID(),
+                "x": this.pos.x, "y": this.pos.y,
+                "heading": this.heading
+            };
+        };
+
+        // compute current position
         this.update = function () {
             this.pos.add(this.vel);
             this.flying = this.pos.dist(this.initPos) < this.range ? true : false;

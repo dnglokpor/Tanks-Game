@@ -101,7 +101,6 @@ function draw() {
   });
 
   // Process shots
-  // TODO modify to turn into rounds
   let expired = [];
   shots.forEach((shot, id) => {
     shot.render();
@@ -166,22 +165,23 @@ function keyPressed() {
   if (tanks.get(mytankid).destroyed)
     return;
   if (key == ' ') { // SPACE_KEY = Fire Shell
-    // TODO integrate the cooldown, rounds type into this
-    const shotid = random(0, 50000);
-    // record actual shot object
-    shots.set(shotid,
-      new Shot(shotid, tanks.get(mytankid).tankid, tanks.get(mytankid).pos, 
-        tanks.get(mytankid).heading, tanks.get(mytankid).tankColor
-      )
-    );
-    // send JSON version to server for broadcast
-    let newShot = { x: tanks.get(mytankid).pos.x, y: tanks.get(mytankid).pos.y, heading: tanks.get(mytankid).heading, 
-      tankColor: tanks.get(mytankid).tankColor, shotid: shotid, tankid: tanks.get(mytankid).tankid };
-    socket.emit('ClientNewShot', newShot);
-    // Play a shot sound
-    soundLib.playSound('tankfire');
+    tank = tanks.get(mytankid);
+    if(tank.canShoot()){
+      let fired = tanks.get(mytankid).fireShell(mytankid, this.pos, this.heading);
+      fired.forEach(shot => {
+        shots.set(shot.shotid, shot);
+        // send JSON version to server for broadcast
+        socket.emit('ClientNewShot', shot.jsonize());
+      });
+      // cooldown
+      // set the time at which the tank can shoot again.
+      tanks.cool(Date.now() + (fired[0].getCD() * 1000));
+      // Play a shot sound
+      soundLib.playSound('tankfire');
+    }
   }
   // movements
+  // TODO add oblique movement and shooting while moving
   if (keyCode == RIGHT_ARROW) {  // Move Right
     tanks.get(mytankid).setRotation(0.2);
   }

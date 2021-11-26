@@ -24,9 +24,21 @@ class Tank {
     this.tankColor = tankColor;
     this.health = 10; // hp
     this.ammo = undefined; // bullets
-    this.hasAmmo = false;
-    this.lastShot = 0; // for cooldown purposes
-    this.canShoot = true; // for cooldown purposes
+    this.nextShot = 0; // for cooldown purposes
+
+    /**
+     * update the **nextShot** attribute of this tank.
+     * @param {Number} cdtime the time it will take for the canon to cool.
+     */
+    this.cool = function(cdtime){
+      this.nextShot = cdtime;
+    };
+    /**
+     * @returns true if the tank has ammo and is not in cooldown.
+     */
+    this.canShoot = function () {
+      return this.ammo != undefined  && this.ammo.rounds > 0 && Date.now() > this.nextShot();
+    };
 
     // Render - to render the tank to the screen
     this.render = function () {
@@ -115,6 +127,4 @@ class Tank {
       this.destroyed = this.health == 0; // destroyed when no health left
     }
   }
-
-  // TODO implement a cooldown control
 }
