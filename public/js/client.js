@@ -26,7 +26,70 @@ const soundLib = new sounds();
 const parseMap = (serializedMap) => {
   return new Map(JSON.parse(serializedMap));
 }
+/**
+ * returns the right shell based on the passed data. it will always return
+ * at least a shell; defaulting to RAW.
+ * @param {Number} rid the id od this Shell.
+ * @param {*} type a string. possibilities are **'R'**, **'S'** or **'B'**
+ * @param {Number} posX the x coordinate of this Shell.
+ * @param {Number} posY the y coordinate of this Shell.
+ * @param {*} rounds the number of rounds left in the shell.
+ * @returns a Shell object of the type **type** with **rounds** in it.
+ */
+const createShell = (rid, type, posX, posY, rounds) => {
+  let ammo = undefined;
+  switch(type){
+    case 'S':
+      ammo = new Shell(
+        rid,
+        "Split Armor Wrecker", rounds, posX, posY,
+        "Power: 5|Range: LOW|Cooldown: 3s"
+      );
+      break;
+    case 'B':
+      ammo = new Shell(
+        rid,
+        "Ballistic Armor Wrecker", rounds, posX, posY,
+        "Power: 8|Range: HIGH|Cooldown: 5s"
+      );
+      break;
+    default:
+      ammo = new Shell(
+        rid,
+        "Rapid Armor Wrecker", rounds, posX, posY,
+        "Power: 2|Range: MEDIUM|Cooldown: 1s"
+      );
+  }
+  return ammo;
+};
+/**
+ * creates a round that matches provided description.
+ * @param {string} type the type of the round.
+ * @param {string} tankid the id of the tank that shot it.
+ * @param {Number} id the id of this specific round in its shell.
+ * @param {Vector} spos the starting position of the round.
+ * @param {*} angle the angle of the shot.
+ * @returns the created round Object.
+ */
+const createRound = (type, tankid, id, spos, angle) => {
+  let round = undefined;
+  switch(type){
+    case "S":
+        round = new SplitAW(tankid, id, spos, angle);
+        break;
+    case "B":
+        round = new BallisticAW(tankid, id, spos, angle);
+        break; 
+    default: // case R:
+        round = new RapidAW(tankid, id, spos, angle);
+  }
+  return round;
+};
 
+/**
+ * p5 drawing context setup function. run once before the start of the
+ * rendering. for setting purposes.
+ */
 function setup() {
 
   // Start the audio context on a click/touch event
@@ -46,7 +109,7 @@ function setup() {
   // Good DEV size
   //win = { width: 600, height: 600 };
   // Good PROD size
-  win = { width: 900, height: 700 };
+  win = { width: 800, height: 600 };
   var canvas = createCanvas(win.width, win.height);
   canvas.parent('sketch-holder');
 
@@ -69,8 +132,10 @@ function setup() {
   socket.on('ServerTankDisconnect', ServerTankDisconnect);
   socket.on('ServerMoveTank', ServerMoveTank);
   socket.on('ServerResetAll', ServerResetAll);
-  socket.on('ServerMoveShot', ServerMoveShot);;;
+  socket.on('ServerMoveShot', ServerMoveShot);
   socket.on('ServerNewShot', ServerNewShot);
+  socket.on('ServerResourcePickUp', ServerResourcePickUp);
+  socket.on('ServerResourceDropped', ServerResourceDropped);
 
   // Join (or start) a new game
   socket.on('connect', function(data) {
@@ -80,6 +145,7 @@ function setup() {
 }
   
 // Draw the screen and process the position updates
+// TODO add guy to inform player on current HP and AMMO
 function draw() {
   background(128);
 
@@ -102,15 +168,15 @@ function draw() {
 
   // Process shots
   let expired = [];
-  shots.forEach((shot, id) => {
-    shot.render();
-    shot.update();
-    if (shot.offscreen()) {
+  shots.forEach((round, id) => {
+    round.render();
+    round.update();
+    if (round.offscreen() || !round.flying) {
       expired.push(id);
     }
     else {
-      let shotData = { x: shot.pos.x, y: shot.pos.y, 
-        shotid: shot.shotid };
+      let shotData = { x: round.pos.x, y: round.pos.y, 
+        shotid: round.shotid };
       socket.emit('ClientMoveShot', shotData);
     }
   });
@@ -148,8 +214,10 @@ function draw() {
   if(tanks && tanks.size > 0 && tanks.has(mytankid)
     && (oldTankx!=tanks.get(mytankid).pos.x || oldTanky!=tanks.get(mytankid).pos.y || oldTankHeading!=tanks.get(mytankid).heading)) {
     let newTank = { x: tanks.get(mytankid).pos.x, y: tanks.get(mytankid).pos.y, 
-      heading: tanks.get(mytankid).heading, tankColor: tanks.get(mytankid).tankColor, 
-      tankid: tanks.get(mytankid).tankid };
+      heading: tanks.get(mytankid).heading, 
+      tankColor: tanks.get(mytankid).tankColor,
+      tankid: tanks.get(mytankid).tankid
+    };
     socket.emit('ClientMoveTank', newTank);
     oldTankx = tanks.get(mytankid).pos.x;
     oldTanky = tanks.get(mytankid).pos.y;
@@ -167,15 +235,17 @@ function keyPressed() {
   if (key == ' ') { // SPACE_KEY = Fire Shell
     tank = tanks.get(mytankid);
     if(tank.canShoot()){
-      let fired = tanks.get(mytankid).fireShell(mytankid, this.pos, this.heading);
+      let fired = tank.ammo.fireShell(mytankid, tank.pos, tank.heading);
       fired.forEach(shot => {
         shots.set(shot.shotid, shot);
         // send JSON version to server for broadcast
-        socket.emit('ClientNewShot', shot.jsonize());
+        let jShot = shot.jsonize();
+        jShot.type = tank.ammo.name[0]; // add type
+        socket.emit('ClientNewShot', jShot);
       });
       // cooldown
       // set the time at which the tank can shoot again.
-      tanks.cool(Date.now() + (fired[0].getCD() * 1000));
+      tank.cool(Date.now() + (fired[0].getCD() * 1000));
       // Play a shot sound
       soundLib.playSound('tankfire');
     }
@@ -217,31 +287,10 @@ function ServerReadyAddNew(data) {
   // set the tanks
   tanks = parseMap(data.opponents);
   shots = parseMap(data.flying);
+  sResources = parseMap(data.resource);
   // resource
-  parseMap(data.resource).forEach((res, rid) => {
-    let ammo = undefined;
-    switch(res.type){
-      case 'S':
-        ammo = new Shell(
-          rid,
-          "Split Armor Wrecker", 10, res.coords.x, res.coords.y,
-          "Power: 5|Range: LOW|Cooldown: 3s"
-        );
-        break;
-      case 'B':
-        ammo = new Shell(
-          rid,
-          "Ballistic Armor Wrecker", 15, res.coords.x, res.coords.y,
-          "Power: 8|Range: HIGH|Cooldown: 5s"
-        );
-        break;
-      default:
-        ammo = new Shell(
-          rid,
-          "Rapid Armor Wrecker", 35, res.coords.x, res.coords.y,
-          "Power: 2|Range: MEDIUM|Cooldown: 1s"
-        );
-    }
+  sResources.forEach((res, rid) => {
+    let ammo = createShell(rid, res.type, res.coords.x, res.coords.y, res.rounds);
     resource.set(rid, ammo);
   });
 
@@ -249,7 +298,10 @@ function ServerReadyAddNew(data) {
   // Make sure it's starting position is at least 20 pixels from the border of all walls
   let startPos = createVector(Math.floor(Math.random()*(win.width-40)+20), Math.floor(Math.random()*(win.height-40)+20));
   let startColor = color(Math.floor(Math.random()*255), Math.floor(Math.random()*255), Math.floor(Math.random()*255));
-  let newTank = { x: startPos.x, y: startPos.y, heading: 0, tankColor: startColor, tankid: socketID, playername: PlayerName };
+  let newTank = { x: startPos.x, y: startPos.y, heading: 0, 
+    tankColor: startColor, tankid: socketID, playername: PlayerName,
+    ammo: undefined
+  };
 
   // Create the new tank and add it to the array
   mytankid = socketID;
@@ -279,10 +331,48 @@ function ServerNewTankAdd(data) {
       let startPos = createVector(Number(tank.x), Number(tank.y));
       let c = color(tank.tankColor.levels[0], tank.tankColor.levels[1], tank.tankColor.levels[2]);
       let newTankObj = new Tank(startPos, c, tank.tankid, tank.playername);
+      if (tank.ammo != undefined){
+        newTankObj.pickup(createShell(tank.ammo.rid, tank.ammo.type, 
+          tank.ammo.coords.x, tank.ammo.coords.y, tank.ammo.rounds));
+      }
       tanks.set(id, newTankObj);
     }
   });
   return;
+}
+
+function ServerResourcePickUp(data) {
+  // data is a JSON with the id of the tank that picked up the ammo and
+  // the id of the picked up resource
+  console.log(data);
+  if (tanks.has(data.tankid)){
+    let old = tanks.get(data.tankid).pickup(resource.get(data.rid)); // pickup
+    resource.delete(data.rid); // remove from list
+    // drop
+    // only the tank doing the drop emits this
+    if (data.tankid == mytankid && old != undefined){
+      // old is ejected in a direction away from user
+      let dropsite = p5.Vector.fromAngle(tanks.get(mytankid).heading + Math.PI);
+      dropsite.mult(6);
+      old.pos.add(dropsite);
+      let dropped = {
+        "rid": old.rid,
+        "type": old.name[0],
+        "coords": {"x": old.pos.x, "y": old.pos.y},
+        "rounds": old.rounds
+      };
+      socket.emit("ClientResourceDropped", dropped)
+    }
+  }
+}
+
+/**
+ * tells all clients to add this resource to the field resources.
+ * @param {JSON} data the resource that was dropped.
+ */
+function ServerResourceDropped(data){
+  resource.set(data.rid, createShell(data.rid, data.type, data.coords.x, 
+    data.coords.y, data.rounds));
 }
 
 /**
@@ -315,7 +405,6 @@ function ServerTankDisconnect(socketid) {
  * @param {JSON} data a json containing the id of the tank, its new position and heading.
  */
 function ServerMoveTank(data) {
-  data = JSON.parse(data);
   if(DEBUG && DEBUG==1)
     console.log('Move Tank: ' + JSON.stringify(data));
   
@@ -334,9 +423,9 @@ function ServerNewShot(data) {
   // First check if this shot is already in our list
   if(!shots.has(data.shotid)) {
     // Add this shot to the end of the array
-    let c = color(data.tankColor.levels[0], data.tankColor.levels[1], data.tankColor.levels[2]);
     shots.set(data.shotid,
-      new Shot(data.shotid, data.tankid, createVector(data.x, data.y), data.heading, c)); 
+      createRound(data.type, data.tankid, data.id, createVector(data.x, data.y),
+        data.angle)); 
   }
 }
 

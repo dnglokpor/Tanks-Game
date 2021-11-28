@@ -24,7 +24,7 @@ class Tank {
     this.tankColor = tankColor;
     this.health = 10; // hp
     this.ammo = undefined; // bullets
-    this.nextShot = 0; // for cooldown purposes
+    this.nextShot = Date.now(); // for cooldown purposes
 
     /**
      * update the **nextShot** attribute of this tank.
@@ -37,7 +37,7 @@ class Tank {
      * @returns true if the tank has ammo and is not in cooldown.
      */
     this.canShoot = function () {
-      return this.ammo != undefined  && this.ammo.rounds > 0 && Date.now() > this.nextShot();
+      return this.ammo != undefined  && this.ammo.rounds > 0 && Date.now() > this.nextShot;
     };
 
     // Render - to render the tank to the screen

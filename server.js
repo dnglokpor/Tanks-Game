@@ -1,21 +1,6 @@
-
 var express = require('express');
 var app = express();
 const request = require('request');
-//const Hapi = require( "hapi" );
-//const routes = require( "./routes" );
-
-// Game items to remember
-var tanks = new Map();
-var shots = new Map();
-var DEBUG = 1;
-
-// stage ammunitions
-var resource = new Map();
-resource.set(1, {"type": "R", "coords": {"x": 200, "y": 200}});
-resource.set(2, {"type": "S", "coords": {"x": 200, "y": 400}});
-resource.set(3, {"type": "B", "coords": {"x": 400, "y": 200}});
-resource.set(4, {"type": "R", "coords": {"x": 400, "y": 400}});
 
 // helper
 /**
@@ -23,9 +8,122 @@ resource.set(4, {"type": "R", "coords": {"x": 400, "y": 400}});
  * @param {Map} map the original map object.
  * @returns the serialized string form of the map.
  */
-const serialize = (map) => {
+ const serialize = (map) => {
   return JSON.stringify(Array.from(map.entries()))
+};
+/**
+ * return the euclidian distance between (x1, y1) and (x2, y2).
+ * @param {*} x1 the x coordinate of the first point.
+ * @param {*} y1 the y coordinate of the first point.
+ * @param {*} x2 the x coordinate of the second point.
+ * @param {*} y2 the y coordinate of the second point.
+ * @returns **SQRT([(x2 - x1)^2 + (y2 - y1)^2])**
+ */
+const dist = (x1, y1, x2, y2) => {
+  return Math.sqrt((x2 - x1) * (x2 - x1) + (y2 - y1) * (y2 - y1));
+};
+
+// spatial manager
+/**
+ * class that implements a spatial hasher with all the required
+ * logic for finding the buckets, adding elements and resetting.
+ * this class is implemented for spatial hashing where the cells
+ * are square.
+ */
+class SpatialManager2D {
+  /**
+   * construct the object using the following data:
+   * @param {Number} s_width the width of the 2D canvas.
+   * @param {Number} w_height the height of the 2D canvas.
+   * @param {Number} c_size the side size of the cell.
+   */
+  constructor(s_width, s_height, c_size) {
+    this.width = s_width;
+    this.height = s_height;
+    this.cell_size = c_size;
+    this.buckets = (s_width * s_height) / (c_size * c_size); // number of buckets
+    this.cvf = 1 / c_size;
+    this.rows = s_width / c_size;
+    this.cols = s_height / c_size;
+    this.index = new Map();
+    for(let i = 0; i < this.buckets; i++)
+      this.index.set(i, []);
+
+    // methods
+    /** resets the spatial index  */
+    this.resetIndex = () => {
+      this.index = new Map();
+      for(let i = 0; i < this.buckets; i++)
+        this.index.set(i, []);
+    };
+    /**
+     * this function returns the id of the bucket in which the passed coordinates
+     * would live.
+     * @param {Number} posX the x coordinate of the object to place
+     * @param {Number} posY the y coordinate of the object to place
+     * @returns the id of the bucket in which to place this object
+     */
+    this.bucketID = (posX, posY) => {
+      posX = posX >= this.width ? posX - 1 : posX;
+      posY = posY >= this.height ? posY - 1 : posY;
+      return parseInt(posX * this.cvf) + parseInt(posY * this.cvf) * this.rows;
+    };
+    /**
+     * adds this object in the index.
+     * @param {Number} goX the x coordinate of the game object.
+     * @param {Number} goY the y coordinate of the game object.
+     * @param {*} gameObj the game object itself.
+     */
+    this.add = (goX, goY, gameObj) => {
+      let bIdx = this.bucketID(goX, goY);
+      this.index.get(bIdx).push(gameObj); // add the gameobject to bucket
+    };
+    /**
+     * return the bucket in which an object at this point coordinates
+     * would be stored.
+     * @param {Number} goX the x coordinate of a point.
+     * @param {Number} goY the y coordinate of a point.
+     * @returns an Array with all the items hashed in the vicinity.
+     */
+    this.bucketOf = (goX, goY) => {
+      return this.index.get(this.bucketID(goX, goY));
+    };
+  }
 }
+
+// screen settings
+const WIDTH = 800;
+const HEIGHT = 600;
+const CELL_SIZE = 80; // experiment to find best collision rates
+
+// Game items to remember
+var tanks = new Map();
+var shots = new Map();
+var DEBUG = 0;
+
+// stage ammunitions
+/**
+ * creates a new the specified resource at the passed position.
+ * @param {Number} the id of this resource.
+ * @param {string} rType the type of the resource. R, S of B.
+ * @param {Number} x the x coordinate of the position.
+ * @param {Number} y the y coordinate of the position.
+ * @returns the JSON for of the resource.
+ */
+const resourceAt = (rid, rType, x, y) => {
+  if(rType == 'B')
+    return {"rid": rid, "type": "B", "coords": {"x": x, "y": y}, "rounds": 5};
+  else if(rType == 'S')
+    return {"rid": rid, "type": "S", "coords": {"x": x, "y": y}, "rounds": 21};
+  else // if (rType == 'R')
+    return {"rid": rid, "type": "R", "coords": {"x": x, "y": y}, "rounds": 25};
+};
+
+var resource = new Map();
+resource.set(1, resourceAt(1, 'R', 200, 200));
+resource.set(2, resourceAt(2, 'S', 200, 400));
+resource.set(3, resourceAt(3, 'B', 400, 200));
+resource.set(4, resourceAt(4, 'R', 400, 400));
 
 // Set up the server
 // process.env.PORT is related to deploying on AWS
@@ -89,9 +187,6 @@ io.sockets.on('connection',
             "flying": serialize(shots)
           }
         );
-
-        // Send to all clients but sender socket
-        //socket.broadcast.emit('NewTank', data);
         
         // This is a way to send to everyone including sender
         // io.sockets.emit('message', "this goes to everyone");
@@ -113,7 +208,8 @@ io.sockets.on('connection',
               on: true, // connection status of the client
               x: Number(data.x), y: Number(data.y), 
               heading: Number(data.heading), tankColor: data.tankColor, 
-              tankid: data.tankid, playername: data.playername
+              tankid: data.tankid, playername: data.playername,
+              ammo: data.ammo
             }
           );
 
@@ -142,12 +238,46 @@ io.sockets.on('connection',
           tanks.get(tankid).y = Number(data.y);
           tanks.get(tankid).heading = data.heading;
         }
-        // TODO add spatial hashing logic
-        
-        // TODO add pickup logic
 
         // Send the move out to all clients but sender s  ocket
-        socket.broadcast.emit('ServerMoveTank', data);
+        io.sockets.emit('ServerMoveTank', data);
+
+        // autopickup when in vicinity
+        let spatialmgr = new SpatialManager2D(WIDTH, HEIGHT, CELL_SIZE); 
+        // add resource to space hasher
+        resource.forEach((res) => {
+          spatialmgr.add(res.coords.x, res.coords.y, res);
+        });
+        // check for nearby collisions to tank position (x, y)
+        // TODO expand to checking in all buckets around tank
+        let x = tanks.get(tankid).x;
+        let y = tanks.get(tankid).y;
+        spatialmgr.bucketOf(x, y).forEach(res => {
+          if (dist(res.coords.x, res.coords.y, x, y) < 10.0){ // collision
+            console.log("RESOURCE PICKED UP");
+            tanks.get(tankid).ammo = res; // mark resource as taken by this tank
+            // tell all tanks.
+            io.sockets.emit('ServerResourcePickUp',
+              { "tankid": tankid, "rid": res.rid }
+            );
+            console.log(JSON.stringify(res) + " was picked by " + tankid.toString());
+            resource.delete(res.rid);
+          }
+        });
+      }
+    );
+    
+    socket.on("ClientResourceDropped",
+      /**
+       * adds the dropped resource to the field resource map.
+       * @param {JSON} data a JSON object with info to build the resource.
+       */
+      function(data){
+        // data is the resource that was dropped in a resource JSON form
+        resource.set(data.rid, data);
+        console.log("Dropped: " + JSON.stringify(data)); 
+        // send it to everyone else but the sender
+        io.sockets.emit("ServerResourceDropped", data);
       }
     );
 
@@ -172,7 +302,7 @@ io.sockets.on('connection',
           console.log('New Shot: ' + JSON.stringify(data));
 
         // Add this shot to the end of the array
-        shots.set(data.shotid, data)
+        shots.set(data.shotid, data);
 
         // Send the change out
         io.sockets.emit('ServerNewShot', data);
@@ -196,6 +326,8 @@ io.sockets.on('connection',
 
         // Look for hits with all tanks
         let shot = shots.get(data.shotid);
+        // TODO use spatial hashing for HIT collision
+        // TODO use HP reduction in HIT collision
         tanks.forEach((tank) => {
           // As long as it's not the tank that fired the shot
           // no need to search destroyed tanks either

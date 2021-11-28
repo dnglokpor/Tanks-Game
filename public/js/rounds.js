@@ -16,8 +16,8 @@ class BaseRound {
     */
     constructor(tankid, idx, spos, angle, power, speed, range, cd, color) {
         this.shotid = tankid + '>' + idx.toString();
-        this.initPos = createVector(spos.x, spos.y);
-        this.pos = createVector(spos.x, spos.y);
+        this.initPos = spos.copy();
+        this.pos = spos.copy();
         this.flying = true;
         this.heading = angle;
         this.vel = p5.Vector.fromAngle(angle);
@@ -37,7 +37,7 @@ class BaseRound {
          * @returns the ID of the round from its shell.
          */
          this.getID = function() {
-            return this.shotid.split('>')[1];
+            return parseInt(this.shotid.split('>')[1]);
         };
         /**
          * @returns the cooldown time of the tank. cooldown is in seconds.
@@ -53,29 +53,27 @@ class BaseRound {
                 "tankid": this.getTankID(),
                 "id": this.getID(),
                 "x": this.pos.x, "y": this.pos.y,
-                "heading": this.heading
+                "angle": this.heading
             };
         };
 
-        // compute current position
+        // compute current position and flag as fallen
+        // when offscreen or out of range
         this.update = function () {
             this.pos.add(this.vel);
-            this.flying = this.pos.dist(this.initPos) < this.range ? true : false;
+            if (this.pos.dist(this.initPos) > this.range || this.offscreen())
+                this.flying = false;
         };
 
         // Render the shot to the screen
         this.render = function () {
             push();
             translate(this.pos.x, this.pos.y);
-            rotate(this.heading + PI / 2);
+            rotate(this.heading);
             stroke(255);
             fill(this.color);
             strokeWeight(1);
-            triangle(
-                this.pos.x - 6, this.pos.y - 3,
-                this.pos.x - 6, this.pos.y + 3,
-                this.pos.x + 6, this.pos.y
-            );
+            triangle(-6, -3, -6, 3, 6, 0);
             pop();
         };
 
@@ -105,7 +103,7 @@ class RapidAW extends BaseRound{
     */
     constructor(tankid, idx, spos, angle) {
         super(
-            tankid, idx, spos, angle, 2, 4, 500, 1, color(0, 0, 255) // Red
+            tankid, idx, spos, angle, 2, 6, 500, 1, color(0, 0, 255) // Red
         );
     }
 }
@@ -124,7 +122,7 @@ class RapidAW extends BaseRound{
     */
     constructor(tankid, idx, spos, angle) {
         super(
-            tankid, idx, spos, angle, 5, 3, 300, 3, color(0, 255, 0) // Red
+            tankid, idx, spos, angle, 5, 4, 300, 2, color(0, 255, 0) // Red
         );
     }
 }
@@ -144,7 +142,7 @@ class RapidAW extends BaseRound{
     */
     constructor(tankid, idx, spos, angle) {
         super(
-            tankid, idx, spos, angle, 8, 5, 700, 5, color(255, 0, 0) // Red
+            tankid, idx, spos, angle, 8, 10, 700, 3, color(255, 0, 0) // Red
         );
     }
 }

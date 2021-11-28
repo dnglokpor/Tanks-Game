@@ -43,24 +43,28 @@ class Shell {
          * @returns the rounds shot in a list.
          */
         this.fireShell = function(tankid, spos, angle) {
-            shot = []; // shots to spawn
+            let shot = []; // shots to spawn
             switch(this.name){
                 case "Split Armor Wrecker":
                     shot.push(new SplitAW(tankid, this.rounds, spos,
                         angle - (Math.PI/15))
                     );
+                    this.unload(); // countdown
                     shot.push(new SplitAW(tankid, this.rounds, spos, angle));
+                    this.unload(); // countdown
                     shot.push(new SplitAW(tankid, this.rounds, spos,
                         angle + (Math.PI/15))
                     );
+                    this.unload(); // countdown
                     break;
                 case "Ballistic Armor Wrecker":
                     shot.push(new BallisticAW(tankid, this.rounds, spos, angle));
+                    this.unload(); // countdown
                     break; 
                 default: // Raw Armor Wrecker
                     shot.push(new RapidAW(tankid, this.rounds, spos, angle));
+                    this.unload(); // countdown
             }
-            this.unload(); // countdown
             return shot;
         };
         
