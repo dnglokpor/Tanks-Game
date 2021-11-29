@@ -128,6 +128,7 @@ function setup() {
   // All the socket listener method
   socket.on('ServerReadyAddNew', ServerReadyAddNew);
   socket.on('ServerNewTankAdd', ServerNewTankAdd);
+  socket.on('ServerTankHit', ServerTankHit);
   socket.on('ServerTankRemove', ServerTankRemove);
   socket.on('ServerTankDisconnect', ServerTankDisconnect);
   socket.on('ServerMoveTank', ServerMoveTank);
@@ -154,32 +155,93 @@ function draw() {
     loopCount = 0;
   else
     loopCount++;
-
-  
+  // color changing
   if (loopCount % 45 == 0){
     rc.r = Math.floor(Math.random() * 127) + 128
     rc.g = Math.floor(Math.random() * 127) + 128
     rc.b = Math.floor(Math.random() * 127) + 128;
   }
-  // draw shells
+  // draw resource
   resource.forEach((shell) => {
     shell.render(color(rc.r, rc.g, rc.b));
   });
-
-  // Process shots
+  // draw shots
   let expired = [];
   shots.forEach((round, id) => {
-    round.render();
-    round.update();
-    if (round.offscreen() || !round.flying) {
-      expired.push(id);
-    }
-    else {
-      let shotData = { x: round.pos.x, y: round.pos.y, 
-        shotid: round.shotid };
-      socket.emit('ClientMoveShot', shotData);
+    try{
+      round.render();
+      round.update();
+      if (round.offscreen() || !round.flying) {
+        expired.push(id);
+      }
+      else {
+        let shotData = { x: round.pos.x, y: round.pos.y, 
+          shotid: round.shotid };
+        socket.emit('ClientMoveShot', shotData);
+      }
+    }catch(ex){
+      console.log(shots);
     }
   });
+  
+  // draw UI
+  if (tanks.has(mytankid)){
+    // draw HP
+    push();
+    translate(100 , 10);
+    fill(0, 0, 0); // black
+    rect(0, 2, 180, 20);
+    let hp = tanks.get(mytankid).health;
+    let red = 0;
+    let green = 255;
+    let blue = 0;
+    if(hp < 5){
+      red = 255;
+      green = 0;
+    }else if(hp < 7){
+      red = 255;
+    }
+    fill(red, green, blue);
+    rect(2, 4, 18 * hp, 20);
+    pop();
+    // draw weapon
+    push();
+    textSize(20);
+    translate(75, 40);
+    fill(0, 0, 0);
+    let ammo = "AMMO: ";
+    if (tanks.get(mytankid).ammo != undefined){
+      if(tanks.get(mytankid).ammo.name[0] == "R")
+        fill(0, 0, 255);
+      else if(tanks.get(mytankid).ammo.name[0] == "S")
+        fill(0, 255, 0);
+      else
+        fill(255, 0, 0);
+      rotate(-Math.PI/4);
+      // TODO get bullets to line up
+      for(let i = 0; i < tanks.get(mytankid).ammo.rounds; i++){
+        let diff = i * 6;
+        triangle(-10 + diff, -5, -10 + diff, 5, 10 + diff, 0);
+      }
+    }else{
+      fill(0);
+      ammo = ammo + "NONE";
+      text(ammo, 0, 0);
+    }
+    pop();
+    if (tanks.get(mytankid).ammo != undefined){
+      // add cooling text
+      push();
+      translate(30, 60);
+      if(tanks.get(mytankid).isCooling()){
+        textSize(25 * (Date.now() - tanks.get(mytankid).nextShot));
+        fill(255, 0, 0);
+        text("Cooling!!!", 0, 0);
+      }
+      pop();
+    }
+  }
+
   // delete expired shots
   expired.forEach(e => {
     if(shots.has(e)){
@@ -194,7 +256,6 @@ function draw() {
           tank.turn();
           tank.update();
         }
-
         // Check for off screen and don't let it go any further
         if(tank.pos.x < 0)
           tank.pos.x = 0;
@@ -245,7 +306,7 @@ function keyPressed() {
       });
       // cooldown
       // set the time at which the tank can shoot again.
-      tank.cool(Date.now() + (fired[0].getCD() * 1000));
+      tank.cool(Date.now() + parseInt(fired[0].getCD() * 1000));
       // Play a shot sound
       soundLib.playSound('tankfire');
     }
@@ -285,7 +346,23 @@ function ServerReadyAddNew(data) {
   console.log('Server Ready');
 
   // set the tanks
-  tanks = parseMap(data.opponents);
+  sTanks = parseMap(data.opponents);
+  // Add any tanks not yet in our tank array
+  sTanks.forEach((tank, id) => {
+    if (!tanks.has(id))
+    {
+      // Add this tank to the end of the array
+      let startPos = createVector(Number(tank.x), Number(tank.y));
+      let c = color(tank.tankColor.levels[0], tank.tankColor.levels[1], tank.tankColor.levels[2]);
+      let newTankObj = new Tank(startPos, c, tank.tankid, tank.playername);
+      if (tank.ammo != undefined){
+        newTankObj.pickup(createShell(tank.ammo.rid, tank.ammo.type, 
+          tank.ammo.coords.x, tank.ammo.coords.y, tank.ammo.rounds));
+      }
+      newTankObj.destroyed = tank.destroyed;
+      tanks.set(id, newTankObj);
+    }
+  });
   shots = parseMap(data.flying);
   sResources = parseMap(data.resource);
   // resource
@@ -316,35 +393,31 @@ function ServerReadyAddNew(data) {
  * upon receiving the complete list of tanks of the server,
  * check for new tanks and adds them to the local
  * database of tanks.
- * @param {string} data 
+ * @param {JSON} data data is the JSON containing the new tank
  */
 function ServerNewTankAdd(data) {
-  // data is a serialized map of all tanks info so we convert it back to a map
-  data = parseMap(data);
   if(DEBUG && DEBUG==1)
     console.log('New Tank: ' + data);
   // Add any tanks not yet in our tank array
-  data.forEach((tank, id) => {
-    if (!tanks.has(id))
-    {
-      // Add this tank to the end of the array
-      let startPos = createVector(Number(tank.x), Number(tank.y));
-      let c = color(tank.tankColor.levels[0], tank.tankColor.levels[1], tank.tankColor.levels[2]);
-      let newTankObj = new Tank(startPos, c, tank.tankid, tank.playername);
-      if (tank.ammo != undefined){
-        newTankObj.pickup(createShell(tank.ammo.rid, tank.ammo.type, 
-          tank.ammo.coords.x, tank.ammo.coords.y, tank.ammo.rounds));
-      }
-      tanks.set(id, newTankObj);
+  if (!tanks.has(data.tankid))
+  {
+    // Add this tank to the end of the array
+    let startPos = createVector(Number(data.x), Number(data.y));
+    let c = color(data.tankColor.levels[0], data.tankColor.levels[1], data.tankColor.levels[2]);
+    let newTankObj = new Tank(startPos, c, data.tankid, data.playername);
+    if(data.ammo != undefined){
+      newTankObj.pickup(createShell(data.ammo.rid, data.ammo.type, 
+        data.ammo.coords.x, data.ammo.coords.y, data.ammo.rounds));
     }
-  });
+    newTankObj.destroyed = data.destroyed;
+    tanks.set(data.tankid, newTankObj);
+  }
   return;
 }
 
 function ServerResourcePickUp(data) {
   // data is a JSON with the id of the tank that picked up the ammo and
   // the id of the picked up resource
-  console.log(data);
   if (tanks.has(data.tankid)){
     let old = tanks.get(data.tankid).pickup(resource.get(data.rid)); // pickup
     resource.delete(data.rid); // remove from list
@@ -376,13 +449,32 @@ function ServerResourceDropped(data){
 }
 
 /**
- * mark the tank at **socketid** as destroyed.
- * @param {string} socketid the id of the tank that was destroyed
+ * emitted when a shot contacts a tank.
+ * @param {JSON} data a JSON containing the id of the shot and id of the tank.
  */
-function ServerTankRemove(socketid) {
-  // console.log('Remove Tank: ' + socketid);
-  if(tanks.has(socketid)){
-      tanks.get(socketid).destroyed = true;
+function ServerTankHit(data){
+  if (tanks.has(data.tankid) && shots.has(data.shotid)){
+    // inflict damage
+    tanks.get(data.tankid).takedamage(shots.get(data.shotid));
+    // remove bullet
+    shots.delete(data.shotid);
+    // the victim says if they're dead
+    if(data.tankid == mytankid){
+      if(tanks.get(mytankid).destroyed){
+        socket.emit("ClientTankDestroyed", mytankid);
+      }
+    }
+  }
+}
+
+/**
+ * mark the tank at **socketid** as destroyed.
+ * @param {string} tankid the id of the tank that was destroyed
+ */
+function ServerTankRemove(tankid) {
+  console.log('Remove Tank: ' + tankid);
+  if(tanks.has(tankid)){
+      tanks.get(tankid).destroyed = true;
   }
   return;
 }

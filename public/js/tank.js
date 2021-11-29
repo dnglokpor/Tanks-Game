@@ -34,10 +34,16 @@ class Tank {
       this.nextShot = cdtime;
     };
     /**
+     * @returns true if the tank has is in cooldown.
+     */
+     this.isCooling = function () {
+      return Date.now() <= this.nextShot;
+    };
+    /**
      * @returns true if the tank has ammo and is not in cooldown.
      */
     this.canShoot = function () {
-      return this.ammo != undefined  && this.ammo.rounds > 0 && Date.now() > this.nextShot;
+      return this.ammo != undefined  && this.ammo.rounds > 0 && !this.isCooling();
     };
 
     // Render - to render the tank to the screen

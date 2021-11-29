@@ -50,6 +50,7 @@ class BaseRound {
          */
         this.jsonize = function(){
             return {
+                "shotid": this.shotid,
                 "tankid": this.getTankID(),
                 "id": this.getID(),
                 "x": this.pos.x, "y": this.pos.y,
@@ -103,7 +104,7 @@ class RapidAW extends BaseRound{
     */
     constructor(tankid, idx, spos, angle) {
         super(
-            tankid, idx, spos, angle, 2, 6, 500, 1, color(0, 0, 255) // Red
+            tankid, idx, spos, angle, 2, 6, 500, 0.5, color(0, 0, 255) // Red
         );
     }
 }

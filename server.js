@@ -1,6 +1,5 @@
 var express = require('express');
 var app = express();
-const request = require('request');
 
 // helper
 /**
@@ -9,14 +8,14 @@ const request = require('request');
  * @returns the serialized string form of the map.
  */
  const serialize = (map) => {
-  return JSON.stringify(Array.from(map.entries()))
+  return JSON.stringify(Array.from(map.entries()));
 };
 /**
  * return the euclidian distance between (x1, y1) and (x2, y2).
- * @param {*} x1 the x coordinate of the first point.
- * @param {*} y1 the y coordinate of the first point.
- * @param {*} x2 the x coordinate of the second point.
- * @param {*} y2 the y coordinate of the second point.
+ * @param {Number} x1 the x coordinate of the first point.
+ * @param {Number} y1 the y coordinate of the first point.
+ * @param {Number} x2 the x coordinate of the second point.
+ * @param {Number} y2 the y coordinate of the second point.
  * @returns **SQRT([(x2 - x1)^2 + (y2 - y1)^2])**
  */
 const dist = (x1, y1, x2, y2) => {
@@ -88,13 +87,42 @@ class SpatialManager2D {
     this.bucketOf = (goX, goY) => {
       return this.index.get(this.bucketID(goX, goY));
     };
+    /**
+     * @param {Number} goX the x-coordinate of the point.
+     * @param {Number} goY the y-coordinate of the point.
+     * @returns an array of all the buckets around the position of the passed point.
+     */
+    this.arround = (goX, goY) => {
+      let areas = [];
+      for(let i = -1; i < 2; i++){
+        for (let j = -1; j < 2; j++){
+          let xVal = goX + i*this.cell_size;
+          let yVal = goY + j*this.cell_size;
+          if (xVal < 0 || xVal > this.width || yVal < 0 || yVal > this.height)
+            continue;
+          else {
+            // DEBUG
+            let idx = this.bucketID(xVal, yVal);
+            if(!this.index.has(idx)){
+              console.log("WEIRD VALUE SPOTTED");
+              console.log(idx);
+              console.log(xVal);
+              console.log(yVal);
+            }
+            // DEBUG END
+            areas.push(this.bucketOf(xVal, yVal));
+          }
+        }
+      }
+      return areas;
+    };
   }
 }
 
 // screen settings
 const WIDTH = 800;
 const HEIGHT = 600;
-const CELL_SIZE = 80; // experiment to find best collision rates
+const CELL_SIZE = 100; // experiment to find best collision rates
 
 // Game items to remember
 var tanks = new Map();
@@ -209,7 +237,7 @@ io.sockets.on('connection',
               x: Number(data.x), y: Number(data.y), 
               heading: Number(data.heading), tankColor: data.tankColor, 
               tankid: data.tankid, playername: data.playername,
-              ammo: data.ammo
+              ammo: data.ammo, destroyed: false
             }
           );
 
@@ -218,7 +246,7 @@ io.sockets.on('connection',
 
         // Send the tank update after giving a quick delay for initialization
         const timeoutObj = setTimeout(() => {
-          io.sockets.emit('ServerNewTankAdd', serialize(tanks));
+          io.sockets.emit('ServerNewTankAdd', tanks.get(data.tankid));
         }, 1500);
       }
     );
@@ -248,21 +276,22 @@ io.sockets.on('connection',
         resource.forEach((res) => {
           spatialmgr.add(res.coords.x, res.coords.y, res);
         });
-        // check for nearby collisions to tank position (x, y)
-        // TODO expand to checking in all buckets around tank
+        // check for nearby resources to tank position (x, y)
         let x = tanks.get(tankid).x;
         let y = tanks.get(tankid).y;
-        spatialmgr.bucketOf(x, y).forEach(res => {
-          if (dist(res.coords.x, res.coords.y, x, y) < 10.0){ // collision
-            console.log("RESOURCE PICKED UP");
-            tanks.get(tankid).ammo = res; // mark resource as taken by this tank
-            // tell all tanks.
-            io.sockets.emit('ServerResourcePickUp',
-              { "tankid": tankid, "rid": res.rid }
-            );
-            console.log(JSON.stringify(res) + " was picked by " + tankid.toString());
-            resource.delete(res.rid);
-          }
+        let surroundings = spatialmgr.arround(x, y);
+        surroundings.forEach((bucket) => {
+          bucket.forEach(res => {
+            if (dist(res.coords.x, res.coords.y, x, y) < 10.0){ // collision
+              tanks.get(tankid).ammo = res; // mark resource as taken by this tank
+              // tell all tanks.
+              io.sockets.emit('ServerResourcePickUp',
+                { "tankid": tankid, "rid": res.rid }
+              );
+              console.log(JSON.stringify(res) + " was picked by " + tankid.toString());
+              resource.delete(res.rid);
+            }
+          });
         });
       }
     );
@@ -318,44 +347,64 @@ io.sockets.on('connection',
         
         // Find the correct shot and save the index
         if(shots.has(data.shotid)) {
-            shots.get(data.shotid).x = Number(data.x);
-            shots.get(data.shotid).y = Number(data.y);
-        }else{ // Just make sure it found one
-          return;
+          shots.get(data.shotid).x = Number(data.x);
+          shots.get(data.shotid).y = Number(data.y);
+        
+          // Look for hits with all tanks
+          let shot = shots.get(data.shotid);
+          // TODO use spatial hashing for HIT collision
+          let spatialmgr = new SpatialManager2D(WIDTH, HEIGHT, CELL_SIZE);
+          // add all tanks
+          tanks.forEach((tank) => {
+            spatialmgr.add(tank.x, tank.y, tank);
+          });
+          // get shots coordinates
+          let shotX = shots.get(data.shotid).x;
+          let shotY = shots.get(data.shotid).y;
+          // check out all possible collisions
+          let surroundings = spatialmgr.arround(shotX, shotY);
+          surroundings.forEach((bucket) => {
+            bucket.forEach((tank) => {
+              // As long as it's not the tank that fired the shot
+              // no need to search destroyed tanks either
+              if(!(shot.tankid == tank.tankid || tank.destroyed)){
+                if(dist(tank.x, tank.y, shotX, shotY) < 15.0) {
+                  if(DEBUG && DEBUG==1){
+                    console.log('HIT ------------------------');
+                    console.log('shotid: ' + shot.shotid);
+                    console.log('Shot-tankid: ' + shot.tankid);
+                    console.log('ShotX: ' + shotX);
+                    console.log('ShotY: ' + shotY);
+                    console.log('Tank-tankid: ' + tank.tankid);
+                    console.log('TankX: ' + tank.x);
+                    console.log('TankY: ' + tank.y);
+                  }
+                  // TODO use HP reduction in HIT collision
+                  io.sockets.emit('ServerTankHit', {"tankid":tank.tankid,
+                    "shotid": shot.shotid});
+                  // tanks.get(tank.tankid).destroyed = true; // mark as hit
+                  shots.delete(shot.shotid); // delete bullet
+                }
+             }
+            });
+          });
         }
-
-        // Look for hits with all tanks
-        let shot = shots.get(data.shotid);
-        // TODO use spatial hashing for HIT collision
-        // TODO use HP reduction in HIT collision
-        tanks.forEach((tank) => {
-          // As long as it's not the tank that fired the shot
-          // no need to search destroyed tanks either
-          if(!(shot.tankid == tank.tankid || tank.destroyed)){
-            var dist = Math.sqrt(Math.pow((shot.x-tank.x), 2) + Math.pow((shot.y-tank.y), 2) );
-            if(dist < 20.0) {
-              if(DEBUG && DEBUG==1) {
-                console.log('HIT ------------------------');
-                console.log('shotid: ' + shot.shotid);
-                console.log('Shot-tankid: ' + shot.tankid);
-                console.log('ShotX: ' + shot.x);
-                console.log('ShotY: ' + shot.y);
-                console.log('Tank-tankid: ' + tank.tankid);
-                console.log('TankX: ' + tank.x);
-                console.log('TankY: ' + tank.y);
-              }
-              // It was a hit, remove the tank and shot
-              // and tell everyone else its gone too
-              io.sockets.emit('ServerTankRemove', tank.tankid);
-              tanks.get(tank.tankid).destroyed = true; // mark as hit
-              shots.delete(shot.shotid); // delete bullet
-              // just return for now to keep from unknown errors
-              return;
-            }
-          }
-        });
       }
     );
+
+    // client dying
+    socket.on("ClientTankDestroyed", 
+      /**
+       * sent by the tank client that got destroyed.
+       * @param {string} data the id of the destroyed tank
+       */
+      function(data){
+        if (tanks.has(data)){
+          tanks.get(data).destroyed = true; // mark this as destroyed
+          // broadcast this to all client
+          io.sockets.emit("ServerTankRemove", data);
+        }
+    });
 
     // Connected client moving Shots
     socket.on('ClientResetAll',
